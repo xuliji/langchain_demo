@@ -11,4 +11,5 @@ dependencies = [
     "pydantic-ai>=2.46.0",
     "pydantic-ai-harness>=0.32.0",
     "python-dotenv>=1.2.3",
+    "rich>=15.0.0",
 ]
