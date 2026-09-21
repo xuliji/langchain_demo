@@ -1,3 +1,4 @@
+import base64
 import json
 import urllib.parse
 import urllib.request
@@ -167,3 +168,9 @@ def stream_response(chunks) -> AIMessage:
         content="".join(content_parts),
         additional_kwargs=additional_kwargs,
     )
+
+
+# 图片base64编码
+def encode_image(imgpath: str, img_type='png') -> str:
+    with open(imgpath, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
