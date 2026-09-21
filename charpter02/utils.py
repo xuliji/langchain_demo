@@ -1,4 +1,64 @@
+import json
+import urllib.parse
+import urllib.request
+
 from langchain_core.messages import AIMessage
+
+
+def get_weather(city: str) -> str:
+    """调用 Open-Meteo API 查询城市天气。"""
+    # 第一步：用城市名称查经纬度。
+    geo_params = urllib.parse.urlencode(
+        {
+            "name": city,
+            "count": 1,
+            "language": "zh",
+            "format": "json",
+        }
+    )
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?{geo_params}"
+
+    with urllib.request.urlopen(geo_url, timeout=10) as response:
+        geo_data = json.loads(response.read().decode("utf-8"))
+
+    results = geo_data.get("results") or []
+    if not results:
+        return json.dumps({"error": f"没有找到城市：{city}"}, ensure_ascii=False)
+
+    location = results[0]
+    latitude = location["latitude"]
+    longitude = location["longitude"]
+
+    # 第二步：用经纬度查当前天气。
+    weather_params = urllib.parse.urlencode(
+        {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,relative_humidity_2m,wind_speed_10m",
+            "timezone": "auto",
+        }
+    )
+    weather_url = f"https://api.open-meteo.com/v1/forecast?{weather_params}"
+
+    with urllib.request.urlopen(weather_url, timeout=10) as response:
+        weather_data = json.loads(response.read().decode("utf-8"))
+
+    current = weather_data.get("current", {})
+    current_units = weather_data.get("current_units", {})
+
+    return json.dumps(
+        {
+            "city": location.get("name"),
+            "country": location.get("country"),
+            "temperature": current.get("temperature_2m"),
+            "temperature_unit": current_units.get("temperature_2m"),
+            "humidity": current.get("relative_humidity_2m"),
+            "humidity_unit": current_units.get("relative_humidity_2m"),
+            "wind_speed": current.get("wind_speed_10m"),
+            "wind_speed_unit": current_units.get("wind_speed_10m"),
+        },
+        ensure_ascii=False,
+    )
 
 
 def _content_to_text(content) -> str:

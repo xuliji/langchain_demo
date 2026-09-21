@@ -5,6 +5,8 @@ import os
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_deepseek import ChatDeepSeek
+from rich import print as rprint
 
 from utils import stream_response
 
@@ -19,3 +21,5 @@ llm_deepseek = init_chat_model(
 
 print(llm_deepseek.profile)
 
+# 模型初始化完整参数
+rprint(ChatDeepSeek.model_fields.items())
