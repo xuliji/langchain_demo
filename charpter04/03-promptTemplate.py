@@ -1,5 +1,5 @@
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate
 
 chat_prompt_template = ChatPromptTemplate.from_messages(
     [("system", "你是一个AI助手，你的名字叫{name}"),
