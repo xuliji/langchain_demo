@@ -3,13 +3,12 @@ import os
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, ToolMessage
-from langfuse import Langfuse,get_client
+from langfuse import Langfuse, get_client
 from langfuse.langchain import CallbackHandler
 
-from utils import get_weather
+from charpter02.utils import get_weather
 
 load_dotenv(override=True)
-
 
 tools = [
     {
