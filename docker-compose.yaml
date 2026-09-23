@@ -1,0 +1,33 @@
+version: '3.8'  # 明确 Compose 版本
+services:
+  postgres:
+    image: library/postgres:16  # 锁定生产版本
+    container_name: pg-service
+    restart: always  # 异常自动重启
+    environment:
+      POSTGRES_USER: ${DB_USER}  # 从 .env 文件读取，避免明文
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      TZ: Asia/Shanghai
+      PGDATA: /var/lib/postgresql/data  # 明确数据存储路径
+    ports:
+      - "127.0.0.1:5432:5432"  # 仅本地监听，通过应用或代理访问
+    volumes:
+      - ./data:/Users/lijixu/PycharmProjects/langchain_demo/temp/postgresql/data  # 数据持久化
+      # - ./init-scripts:/docker-entrypoint-initdb.d  # 初始化脚本目录（可选）
+    deploy:
+      resources:
+        limits:
+          cpus: '2'  # 限制 CPU 使用率
+          memory: 4G  # 限制最大内存
+    healthcheck:  # 健康检查（生产必备）
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app-network  # 自定义网络，隔离其他服务
+
+networks:
+  app-network:
+    driver: bridge  # 生产可替换为 overlay 网络（集群场景）
