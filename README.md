@@ -1,6 +1,6 @@
 # LangChain Demo
 
-一个用于学习 LangChain / LangGraph 的示例项目，覆盖模型初始化与调用、消息与流式输出、多模态、Prompt 模板、结构化输出、工具调用、Agent、中间件、钩子（hooks）、记忆与持久化，以及 Langfuse / LangSmith 可观测性等主题。示例主要围绕 DeepSeek 模型展开。
+一个用于学习 LangChain / LangGraph 的示例项目，覆盖模型初始化与调用、消息与流式输出、多模态、Prompt 模板、结构化输出、工具调用、Agent、中间件、钩子（hooks）、记忆与持久化、RAG（检索增强生成），以及 Langfuse / LangSmith 可观测性等主题。示例主要围绕 DeepSeek 模型展开，向量检索部分使用 Milvus + Ollama 嵌入模型。
 
 ## 项目结构
 
@@ -48,8 +48,15 @@
 │   └── 02-Warp-Style-Hook.ipynb             # 包裹式钩子
 ├── charpter10-memery/                 # 记忆与持久化
 │   ├── 01-ShortMemery.ipynb                 # 短期记忆（内存 / SQLite）
-│   ├── 02-LongMemery.ipynb                  # 长期记忆（PostgreSQL）
-│   └── 02-记忆治理策略.ipynb                 # 记忆压缩与删除
+│   ├── 02-记忆治理策略.ipynb                 # 记忆压缩与删除
+│   └── 03-LongMemery.ipynb                  # 长期记忆（PostgreSQL）
+├── charpter11-RAG/                    # 检索增强生成（RAG）
+│   ├── 01-SourceLoader.ipynb                # 文档加载器（txt / csv / json / pdf / web / …）
+│   ├── 02-Split.ipynb                       # 文本切分器
+│   ├── 03-embedding.ipynb                   # 嵌入模型（Ollama）
+│   └── 04-milvus.ipynb                      # Milvus 向量库 + 相似度检索 + 接入 Agent
+├── docker-compose-Milvus.yaml               # Milvus Standalone（etcd / MinIO / Milvus / Attu）
+├── docker-compose-pg.yaml                   # PostgreSQL（charpter10 长期记忆）
 ├── pyproject.toml
 ├── uv.lock
 ├── .env.template                            # 环境变量模板
@@ -64,14 +71,19 @@
 - Python >= 3.14
 - [uv](https://docs.astral.sh/uv/)
 - DeepSeek API Key
+- [Ollama](https://ollama.com/)（可选，用于 `charpter11` 的本地嵌入模型）
+- Docker / Docker Compose（可选，用于 `charpter10` 的 PostgreSQL 与 `charpter11` 的 Milvus）
 - Langfuse 账号（可选，用于 `charpter03` 的 trace 日志）
 - PostgreSQL（可选，用于 `charpter10` 的长期记忆示例）
+- Milvus（可选，用于 `charpter11` 的向量检索示例）
 
 项目依赖定义在 `pyproject.toml` 中，主要包括：
 
-- `langchain`、`langchain-core`
+- `langchain`、`langchain-core`、`langchain-community`
 - `langchain-deepseek`、`langchain-openai`、`langchain-ollama`、`langchain-openrouter`
 - `langgraph-checkpoint-sqlite`、`langgraph-checkpoint-postgres`、`psycopg`
+- `pymilvus`（Milvus 向量库客户端）
+- `pypdf`、`unstructured`、`markdown`、`jq`（文档加载与解析）
 - `langchain-tavily` / `tavily`（联网搜索工具）
 - `langfuse`
 - `pydantic-ai`、`pydantic-ai-harness`
@@ -224,10 +236,65 @@ uv run python charpter05/02-toolchoice.py   # tool_choice 与重试
 | Notebook | 主题 |
 | --- | --- |
 | `01-ShortMemery.ipynb` | 短期记忆：`InMemorySaver` 与持久化 `SqliteSaver` / `AsyncSqliteSaver` |
-| `03-LongMemery.ipynb` | 长期记忆：基于 PostgreSQL 的 `PostgresSaver` |
 | `02-记忆治理策略.ipynb` | 记忆治理：压缩（摘要）与删除（滑动窗口 / token 裁剪 / 精确删除） |
+| `03-LongMemery.ipynb` | 长期记忆：基于 PostgreSQL 的 `PostgresSaver` 与 Store（跨会话记忆） |
 
 > 持久化示例会把数据库文件写入 `temp/`（已加入 `.gitignore`）。
+
+### charpter11-RAG：检索增强生成（Notebook）
+
+RAG 的完整链路：文档加载 → 文本切分 → 向量化 → 入库检索 → 接入 Agent 回答。
+
+| Notebook | 主题 |
+| --- | --- |
+| `01-SourceLoader.ipynb` | 文档加载器：`TextLoader` / `DirectoryLoader` / `CSVLoader` / `JSONLoader` / `PyPDFLoader` / `WebBaseLoader` / `Unstructured`，以及 `lazy_load` 与自定义 Loader |
+| `02-Split.ipynb` | 文本切分器：`RecursiveCharacterTextSplitter`、Markdown / HTML / JSON 切分、`TokenTextSplitter`、按代码语言切分 |
+| `03-embedding.ipynb` | 嵌入模型：使用 `OllamaEmbeddings`（`qwen3-embedding:0.6b`）对查询与文档做向量化 |
+| `04-milvus.ipynb` | Milvus 向量库：建库建表、嵌入并写入、相似度检索，最后把检索结果格式化后接入 `create_agent` |
+
+前置准备：
+
+1. 启动 Milvus（见下方「Docker 服务」）。
+2. 拉取嵌入模型（`04` 需要，`03` 同样）：
+
+   ```bash
+   ollama pull qwen3-embedding:0.6b
+   ```
+
+3. `04-milvus.ipynb` 会读取 `./temp/source_loader_demo/attention.pdf`，该文件由 `01-SourceLoader.ipynb` 生成（若已存在可跳过）。
+
+> `04` 会把知识块格式化为 `[片段 n｜相似度 x.xxxx]` 并交给 Agent；相似度 `distance` 为 Milvus 的余弦相似度分数，越大越相似。
+
+## Docker 服务
+
+项目提供两个可选的 Compose 文件，用于本地起依赖服务（数据持久化到 `./volumes`、`./data`，均已加入 `.gitignore`）。
+
+### Milvus（charpter11 向量检索）
+
+`docker-compose-Milvus.yaml` 会拉起 Milvus Standalone 及其依赖 etcd、MinIO，并附带 Attu 可视化界面：
+
+```bash
+docker compose -f docker-compose-Milvus.yaml up -d
+docker compose -f docker-compose-Milvus.yaml ps      # 等待 standalone 变为 healthy
+docker compose -f docker-compose-Milvus.yaml down    # 停止（数据保留）
+```
+
+| 端口 | 用途 |
+| --- | --- |
+| `19530` | Milvus SDK（`pymilvus` / LangChain 连接） |
+| `9091` | Milvus 健康检查 / 指标 |
+| `9000` / `9001` | MinIO S3 API / Web 控制台（`minioadmin` / `minioadmin`） |
+| `8000` | Attu Web UI（http://localhost:8000） |
+
+Notebook 中通过 `MilvusClient("http://localhost:19530")` 连接。国内默认使用 daocloud 镜像加速前缀，如需官方镜像可去掉镜像名中的前缀。
+
+### PostgreSQL（charpter10 长期记忆）
+
+`docker-compose-pg.yaml` 使用 `.env` 中的 `DB_USER` / `DB_PASSWORD` / `DB_NAME` 启动 PostgreSQL 16：
+
+```bash
+docker compose -f docker-compose-pg.yaml up -d
+```
 
 ## 运行 Jupyter Notebook
 
@@ -277,12 +344,42 @@ uv add psycopg-binary
 
 `uv.lock` 是 uv 生成的依赖锁定文件，用于记录精确的依赖版本，保证不同环境安装到一致的包版本。通常建议提交到版本库。
 
+### `MilvusClient` 连接失败 / `Connection refused`（charpter11）
+
+确认 Milvus 已启动并处于 healthy 状态，且端口为 `19530`：
+
+```bash
+docker compose -f docker-compose-Milvus.yaml ps
+```
+
+### `embed_documents` 报类型错误（charpter11）
+
+`Embeddings.embed_documents(texts)` 接收的是**纯文本列表 `list[str]`**，不是 `Document` 列表。若用 `load_and_split()` / `split_documents()` 得到的是 `list[Document]`，需要先取出文本：
+
+```python
+chunks = loader.load_and_split(text_splitter=splitter)
+texts = [chunk.page_content for chunk in chunks]
+embeddings = embed_model.embed_documents(texts)
+```
+
+另外注意不要把变量名取成 `load_and_split`，否则会覆盖 loader 的同名方法。
+
+### Ollama 报 `model not found`（charpter11）
+
+需要先拉取嵌入模型：
+
+```bash
+ollama pull qwen3-embedding:0.6b
+```
+
+并确认 Ollama 服务在运行（默认 `http://localhost:11434`）。
+
 ## 后续可扩展示例
 
 - 批量调用 `batch()`
 - LCEL 链式调用
-- RAG 检索增强生成
 - 多智能体编排
+- RAG 进阶：重排序（rerank）、混合检索、检索结果评估
 
 ## License
 
