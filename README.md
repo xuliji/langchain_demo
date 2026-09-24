@@ -224,7 +224,7 @@ uv run python charpter05/02-toolchoice.py   # tool_choice 与重试
 | Notebook | 主题 |
 | --- | --- |
 | `01-ShortMemery.ipynb` | 短期记忆：`InMemorySaver` 与持久化 `SqliteSaver` / `AsyncSqliteSaver` |
-| `02-LongMemery.ipynb` | 长期记忆：基于 PostgreSQL 的 `PostgresSaver` |
+| `03-LongMemery.ipynb` | 长期记忆：基于 PostgreSQL 的 `PostgresSaver` |
 | `02-记忆治理策略.ipynb` | 记忆治理：压缩（摘要）与删除（滑动窗口 / token 裁剪 / 精确删除） |
 
 > 持久化示例会把数据库文件写入 `temp/`（已加入 `.gitignore`）。
