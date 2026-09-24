@@ -1,0 +1,115 @@
+# Milvus Standalone 单机版：etcd（元数据）+ MinIO（对象存储）+ Milvus + Attu（可视化）
+#
+# 用法：
+#   docker compose -f docker-compose-Milvus.yaml up -d
+#   docker compose -f docker-compose-Milvus.yaml ps      # 等待 standalone 变为 healthy
+#   docker compose -f docker-compose-Milvus.yaml down    # 停止（数据保留在 ./volumes）
+#
+# 端口：
+#   19530  Milvus SDK（pymilvus / LangChain 连接用）
+#   9091   Milvus 健康检查 / 指标
+#   9000   MinIO S3 API
+#   9001   MinIO Web 控制台
+#   8000   Attu Web UI（浏览器访问 http://localhost:8000）
+#
+# 数据持久化到 ./volumes（已加入 .gitignore）；可用环境变量 DOCKER_VOLUME_DIRECTORY 指定根目录。
+#
+# 镜像：国内默认走 daocloud 镜像站加速（docker.m.daocloud.io / quay.m.daocloud.io）。
+#       如需官方镜像，把镜像名里的前缀去掉即可，例如
+#         docker.m.daocloud.io/milvusdb/milvus:v2.5.4  ->  milvusdb/milvus:v2.5.4
+
+name: langchain-milvus
+
+services:
+  # etcd：保存 Milvus 的元数据（集合、索引、分区等）
+  etcd:
+    container_name: milvus-etcd
+    # 官方: quay.io/coreos/etcd:v3.5.18（quay 无法用 registry-mirrors 加速，这里直接用镜像站前缀）
+    image: quay.m.daocloud.io/coreos/etcd:v3.5.18
+    environment:
+      # 自动压缩：按版本号(revision)压缩，保留最近 1000 个版本
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      # etcd 后端存储配额：4 GiB
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      # 每 50000 次写操作触发一次快照
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      # 数据目录（挂载到容器内 /etcd）
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    # 监听 0.0.0.0:2379，并让客户端通过服务名 etcd 访问
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      # 健康检查：etcdctl 探测端点状态
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # MinIO：对象存储（S3 兼容），保存向量、索引等实际数据
+  minio:
+    container_name: milvus-minio
+    # 官方: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    image: docker.m.daocloud.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      # 默认账号密码（仅用于本地开发，生产请务必修改）
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web 控制台
+    volumes:
+      # 数据目录（挂载到容器内 /minio_data）
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    # 启动 MinIO 服务，控制台监听 9001
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Milvus 本体（standalone 单机模式），依赖 etcd 与 MinIO
+  standalone:
+    container_name: milvus-standalone
+    # 官方: milvusdb/milvus:v2.5.4
+    image: docker.m.daocloud.io/milvusdb/milvus:v2.5.4
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      # Milvus 需要放宽 seccomp，否则在某些内核/平台上可能启动失败
+      - seccomp:unconfined
+    environment:
+      # Milvus 的元数据存储在 etcd
+      ETCD_ENDPOINTS: etcd:2379
+      # Milvus 的数据存储在 MinIO
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      # Milvus 自身数据目录（挂载到容器内 /var/lib/milvus）
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+    ports:
+      - "19530:19530"  # SDK 端口（pymilvus / LangChain 连接）
+      - "9091:9091"    # 健康检查与指标
+    healthcheck:
+      # start_period 给 Milvus 首次启动留足时间（通常需要几十秒）
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    # 先启动 etcd 与 MinIO，再启动 Milvus
+    depends_on:
+      - etcd
+      - minio
+
+  # Attu：Milvus 的可视化管理界面（可选，方便查看集合/数据）
+  attu:
+    container_name: milvus-attu
+    # 官方: zilliz/attu:v2.5
+    image: docker.m.daocloud.io/zilliz/attu:v2.5
+    environment:
+      # 容器内通过服务名访问 Milvus
+      MILVUS_URL: milvus-standalone:19530
+    ports:
+      - "8000:3000"    # 浏览器访问 http://localhost:8000
+    depends_on:
+      - standalone

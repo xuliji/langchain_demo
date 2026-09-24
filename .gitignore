@@ -12,3 +12,6 @@ __pycache__/
 
 # pytest
 .pytest_cache/
+
+# Docker (Milvus volumes)
+volumes/
